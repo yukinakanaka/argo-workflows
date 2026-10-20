@@ -143,6 +143,7 @@ metricsConfig: |
         - name
     k8s_request_duration:
       histogramBuckets: [ 1.0, 2.0, 10.0 ]
+    # An example custom metric name, see the ttl modifier below
     workflow_duration:
       ttl: "30m"
 ```
@@ -183,6 +184,39 @@ For [custom metrics](metrics.md#custom-metrics) only, this sets how long a serie
 Use it to remove series that only matter while a workflow is running, such as a duration gauge, without clearing other custom metrics such as counters.
 A realtime metric is only removed once its workflow has completed.
 Histogram metrics are never cleared.
+
+For example, this Workflow defines a realtime custom gauge named `workflow_duration`; the name is only an example, use the name of your own custom metric:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: duration-
+spec:
+  entrypoint: main
+  metrics:
+    prometheus:
+      - name: workflow_duration
+        help: Duration gauge in seconds
+        gauge:
+          realtime: true
+          value: "{{workflow.duration}}"
+  templates:
+    - name: main
+      container:
+        image: busybox
+        command: [sleep, "30"]
+```
+
+Without a TTL, the controller keeps exporting the last `workflow_duration` value after the Workflow completes.
+This modifier removes those series 30 minutes after the Workflow completes, and leaves other custom metrics alone:
+
+```yaml
+metricsConfig: |
+  modifiers:
+    workflow_duration:
+      ttl: "30m"
+```
 
 ## Tracing
 
