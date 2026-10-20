@@ -1,6 +1,8 @@
 package telemetry
 
 import (
+	"time"
+
 	"go.opentelemetry.io/otel/attribute"
 	metricsdk "go.opentelemetry.io/otel/sdk/metric"
 )
@@ -10,6 +12,7 @@ type MetricsModifier struct {
 	Disabled           bool
 	DisabledAttributes []string
 	HistogramBuckets   []float64
+	TTL                time.Duration
 }
 
 // Create an opentelemetry 'view' which disables whole metrics or aggregates across attributes

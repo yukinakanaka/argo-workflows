@@ -1573,6 +1573,7 @@ func (wfc *WorkflowController) getMetricsServerConfig() *telemetry.MetricsConfig
 			Disabled:           modifier.Disabled,
 			DisabledAttributes: modifier.DisabledAttributes,
 			HistogramBuckets:   modifier.HistogramBuckets,
+			TTL:                time.Duration(modifier.TTL),
 		}
 	}
 

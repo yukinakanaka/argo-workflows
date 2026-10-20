@@ -127,7 +127,7 @@ func TestRealtimeMetricGC(t *testing.T) {
 	assert.True(t, ok)
 	assert.Len(t, userData.values, 1)
 
-	go m.customMetricsGC(ctx, config.TTL)
+	go m.customMetricsGC(ctx)
 
 	// simulate workflow is still running.
 	// ensure we get at least one TTL run
@@ -147,6 +147,126 @@ func TestRealtimeMetricGC(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	assert.Empty(t, userData.values)
+}
+
+// ageCustomMetric pretends every value of the named custom metric was last updated age ago
+func ageCustomMetric(t *testing.T, m *Metrics, name string, age time.Duration) *customMetricUserData {
+	t.Helper()
+	inst := m.GetCustomMetric(name)
+	require.NotNil(t, inst)
+	ud := customUserData(inst, true)
+	ud.mutex.RLock()
+	defer ud.mutex.RUnlock()
+	for _, value := range ud.values {
+		value.mutex.Lock()
+		value.lastUpdated = time.Now().Add(-age)
+		value.mutex.Unlock()
+	}
+	return ud
+}
+
+func upsertGauge(ctx context.Context, t *testing.T, m *Metrics, name string) {
+	t.Helper()
+	err := m.UpsertCustomMetric(ctx, &wfv1.Prometheus{
+		Name:  name,
+		Help:  "none",
+		Gauge: &wfv1.Gauge{Value: "1"},
+	}, "owner", nil)
+	require.NoError(t, err)
+}
+
+func TestCustomMetricTTLModifier(t *testing.T) {
+	// TTLs are long enough that the background GC never ticks during the test
+	tests := []struct {
+		name          string
+		globalTTL     time.Duration
+		modifierTTL   time.Duration
+		age           time.Duration
+		wantModified  int
+		wantUnchanged int
+	}{
+		{name: "modifier TTL without global TTL", globalTTL: 0, modifierTTL: time.Hour, age: 2 * time.Hour, wantModified: 0, wantUnchanged: 1},
+		{name: "modifier TTL longer than global TTL", globalTTL: time.Hour, modifierTTL: 3 * time.Hour, age: 2 * time.Hour, wantModified: 1, wantUnchanged: 0},
+		{name: "modifier TTL shorter than global TTL", globalTTL: 3 * time.Hour, modifierTTL: time.Hour, age: 2 * time.Hour, wantModified: 0, wantUnchanged: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := telemetry.MetricsConfig{
+				Enabled: true,
+				TTL:     tt.globalTTL,
+				Modifiers: map[string]telemetry.MetricsModifier{
+					"modified_gauge": {TTL: tt.modifierTTL},
+				},
+			}
+			ctx := logging.TestContext(t.Context())
+			m, _, err := createTestMetrics(ctx, &config, Callbacks{})
+			require.NoError(t, err)
+
+			upsertGauge(ctx, t, m, "modified_gauge")
+			upsertGauge(ctx, t, m, "unchanged_gauge")
+			modified := ageCustomMetric(t, m, "modified_gauge", tt.age)
+			unchanged := ageCustomMetric(t, m, "unchanged_gauge", tt.age)
+
+			m.runCustomGC()
+
+			assert.Len(t, modified.values, tt.wantModified)
+			assert.Len(t, unchanged.values, tt.wantUnchanged)
+		})
+	}
+}
+
+func TestRealtimeCustomMetricTTLModifier(t *testing.T) {
+	config := telemetry.MetricsConfig{
+		Enabled: true,
+		Modifiers: map[string]telemetry.MetricsModifier{
+			"realtime_metric": {TTL: time.Hour},
+		},
+	}
+	ctx := logging.TestContext(t.Context())
+	m, _, err := createTestMetrics(ctx, &config, Callbacks{})
+	require.NoError(t, err)
+
+	wfKey := "workflow-uid"
+	err = m.UpsertCustomMetric(ctx, &wfv1.Prometheus{
+		Name:  "realtime_metric",
+		Help:  "none",
+		Gauge: &wfv1.Gauge{Realtime: new(true)},
+	}, wfKey, func() float64 { return 1.0 })
+	require.NoError(t, err)
+	ud := ageCustomMetric(t, m, "realtime_metric", 2*time.Hour)
+
+	// still running
+	m.runCustomGC()
+	assert.Len(t, ud.values, 1)
+
+	m.CompleteRealtimeMetricsForWfUID(wfKey)
+	m.runCustomGC()
+	assert.Empty(t, ud.values)
+}
+
+func TestCustomMetricGCInterval(t *testing.T) {
+	tests := []struct {
+		name      string
+		globalTTL time.Duration
+		modifiers map[string]telemetry.MetricsModifier
+		want      time.Duration
+	}{
+		{name: "nothing configured", want: 0},
+		{name: "global only", globalTTL: time.Hour, want: time.Hour},
+		{name: "modifier only", modifiers: map[string]telemetry.MetricsModifier{"a": {TTL: time.Minute}}, want: time.Minute},
+		{name: "modifier without TTL", globalTTL: time.Hour, modifiers: map[string]telemetry.MetricsModifier{"a": {Disabled: true}}, want: time.Hour},
+		{name: "shortest wins", globalTTL: time.Minute, modifiers: map[string]telemetry.MetricsModifier{"a": {TTL: time.Hour}, "b": {TTL: time.Second}}, want: time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := telemetry.MetricsConfig{Enabled: true, TTL: tt.globalTTL, Modifiers: tt.modifiers}
+			ctx, cancel := context.WithCancel(logging.TestContext(t.Context()))
+			defer cancel()
+			m, _, err := createTestMetrics(ctx, &config, Callbacks{})
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, m.gcInterval())
+		})
+	}
 }
 
 func TestWorkflowQueueMetrics(t *testing.T) {

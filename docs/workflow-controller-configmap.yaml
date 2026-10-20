@@ -246,6 +246,9 @@ data:
           - name
       k8s_request_duration:
         histogramBuckets: [ 1.0, 2.0, 10.0 ]
+      # TTL for a custom metric, overriding metricsTTL
+      workflow_duration:
+        ttl: "30m"
     # Which temporality to use for OpenTelemetry. Default is "Cumulative"
     temporality: Delta
 

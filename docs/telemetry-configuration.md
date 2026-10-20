@@ -143,6 +143,8 @@ metricsConfig: |
         - name
     k8s_request_duration:
       histogramBuckets: [ 1.0, 2.0, 10.0 ]
+    workflow_duration:
+      ttl: "30m"
 ```
 
 #### Modifiers
@@ -172,6 +174,15 @@ This can be used to reduce cardinality of metrics.
 
 For histogram metrics only, this will change the boundary values for the histogram buckets.
 All values must be floating point numbers.
+
+```yaml
+  ttl: "30m"
+```
+
+For [custom metrics](metrics.md#custom-metrics) only, this sets how long a series of the named metric is kept after its last update, overriding `metricsTTL`.
+Use it to remove series that only matter while a workflow is running, such as a duration gauge, without clearing other custom metrics such as counters.
+A realtime metric is only removed once its workflow has completed.
+Histogram metrics are never cleared.
 
 ## Tracing
 
