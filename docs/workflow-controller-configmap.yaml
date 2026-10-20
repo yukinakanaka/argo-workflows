@@ -237,10 +237,10 @@ data:
     ignoreErrors: false
     # Use a self-signed cert for TLS
     secure: true
-    # Options for configuring individual metrics
-    options:
+    # Modifiers for configuring individual metrics
+    modifiers:
       pod_missing:
-        disable: true
+        disabled: true
       cronworkflows_triggered_total:
         disabledAttributes:
           - name
