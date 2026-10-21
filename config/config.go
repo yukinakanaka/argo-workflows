@@ -470,6 +470,9 @@ type MetricModifier struct {
 	// HistogramBuckets allow configuring of the buckets used in a histogram
 	// Has no effect on non-histogram buckets
 	HistogramBuckets []float64 `json:"histogramBuckets,omitempty"`
+	// TTL sets how long a custom metric of this name is kept after its last update, overriding MetricsTTL.
+	// Has no effect on built-in metrics or histograms
+	TTL TTL `json:"ttl,omitempty"`
 }
 
 // MetricsTemporality defines the temporality of OpenTelemetry metrics

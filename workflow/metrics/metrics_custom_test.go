@@ -93,7 +93,7 @@ func TestUpsertCustomMetric_Concurrency(t *testing.T) {
 			case <-stop:
 				return
 			default:
-				m.runCustomGC(1 * time.Hour)
+				m.runCustomGC()
 			}
 		}
 	})

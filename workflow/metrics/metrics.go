@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/argoproj/argo-workflows/v4/util/logging"
 	"github.com/argoproj/argo-workflows/v4/util/telemetry"
@@ -17,6 +18,8 @@ type Metrics struct {
 	realtimeMutex      sync.Mutex
 	customMetricsMutex sync.Mutex
 	realtimeWorkflows  map[string][]realtimeTracker
+	customTTL          time.Duration
+	customTTLOverrides map[string]time.Duration
 	fallbackLogger     logging.Logger // use a logger from context if available
 }
 
@@ -35,10 +38,18 @@ func New(ctx context.Context, serviceName, prometheusName string, config *teleme
 	}
 
 	metrics := &Metrics{
-		Metrics:           m,
-		callbacks:         callbacks,
-		realtimeWorkflows: make(map[string][]realtimeTracker),
-		fallbackLogger:    logging.RequireLoggerFromContext(ctx),
+		Metrics:            m,
+		callbacks:          callbacks,
+		realtimeWorkflows:  make(map[string][]realtimeTracker),
+		customTTL:          config.TTL,
+		customTTLOverrides: make(map[string]time.Duration),
+		fallbackLogger:     logging.RequireLoggerFromContext(ctx),
+	}
+
+	for name, modifier := range config.Modifiers {
+		if modifier.TTL > 0 {
+			metrics.customTTLOverrides[name] = modifier.TTL
+		}
 	}
 
 	err = metrics.populate(ctx,
@@ -69,7 +80,7 @@ func New(ctx context.Context, serviceName, prometheusName string, config *teleme
 		return nil, err
 	}
 
-	go metrics.customMetricsGC(ctx, config.TTL)
+	go metrics.customMetricsGC(ctx)
 
 	return metrics, nil
 }

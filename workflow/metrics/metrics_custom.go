@@ -320,10 +320,34 @@ func (m *Metrics) createCustomGauge(metricSpec *wfv1.Prometheus) error {
 	return inst.RegisterCallback(m.Metrics, customInst.customCallback)
 }
 
-func (m *Metrics) runCustomGC(ttl time.Duration) {
+// ttlFor returns the TTL for the custom metric name, preferring a
+// per-metric modifier over the global metricsTTL. Zero means never expire.
+func (m *Metrics) ttlFor(name string) time.Duration {
+	if ttl, ok := m.customTTLOverrides[name]; ok {
+		return ttl
+	}
+	return m.customTTL
+}
+
+// gcInterval is the shortest configured custom metric TTL, or zero if none are set.
+func (m *Metrics) gcInterval() time.Duration {
+	interval := m.customTTL
+	for _, ttl := range m.customTTLOverrides {
+		if interval == 0 || ttl < interval {
+			interval = ttl
+		}
+	}
+	return interval
+}
+
+func (m *Metrics) runCustomGC() {
 	m.IterateROInstruments(func(baseMetric *telemetry.Instrument) {
 		ud := customUserData(baseMetric, false)
 		if ud == nil {
+			return
+		}
+		ttl := m.ttlFor(baseMetric.GetName())
+		if ttl == 0 {
 			return
 		}
 		ud.mutex.Lock()
@@ -347,19 +371,20 @@ func (m *Metrics) runCustomGC(ttl time.Duration) {
 	})
 }
 
-func (m *Metrics) customMetricsGC(ctx context.Context, ttl time.Duration) {
-	if ttl == 0 {
+func (m *Metrics) customMetricsGC(ctx context.Context) {
+	interval := m.gcInterval()
+	if interval == 0 {
 		return
 	}
 
-	ticker := time.NewTicker(ttl)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			m.runCustomGC(ttl)
+			m.runCustomGC()
 		}
 	}
 }
